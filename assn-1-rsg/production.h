@@ -9,6 +9,7 @@
 #ifndef __production__
 #define __production__
 
+#include <map>
 #include <vector>
 #include <fstream>
 #include <iostream>
@@ -28,6 +29,8 @@ class Production {
   typedef vector<string>::const_iterator const_iterator;
   
  public:
+
+  vector<string> nonterminals;
   
   /**
    * Default Constructor: Production
@@ -90,6 +93,8 @@ class Production {
   const_iterator begin() const { return phrases.begin(); }
   iterator end() { return phrases.end(); }
   const_iterator end() const { return phrases.end(); }
+
+  const string expand(map<string, string>& expansions) const;
   
  private:
   vector<string> phrases;

@@ -27,7 +27,7 @@ using namespace std;
  *                to their definitions.
  */
 
-static void readGrammar(ifstream& infile, map<string, Definition>& grammar)
+static void readGrammar(ifstream& infile, map<string, Definition>& definitions)
 {
   while (true) {
     string uselessText;
@@ -35,8 +35,30 @@ static void readGrammar(ifstream& infile, map<string, Definition>& grammar)
     if (infile.eof()) return;  // true? we encountered EOF before we saw a '{': no more productions!
     infile.putback('{');
     Definition def(infile);
-    grammar[def.getNonterminal()] = def;
+    if (def.getNonterminal() != "")
+        definitions[def.getNonterminal()] = def;
   }
+}
+
+static const string expandDefinitionRandom(Definition& def, map<string, Definition>& definitions)
+{
+  const Production& prod = def.getRandomProduction();
+
+  map<string, string> expansions;
+  for (int i = 0; i < prod.nonterminals.size(); i++) {
+    const string nonterminal = prod.nonterminals[i];
+    const string expandedDef = expandDefinitionRandom(definitions[nonterminal], definitions);
+    expansions[nonterminal] = expandedDef;
+  }
+
+  return prod.expand(expansions);
+}
+
+static const string produceRandomSentences(map<string, Definition>& definitions)
+{
+  Definition& startDef = definitions["<start>"];
+
+  return expandDefinitionRandom(startDef, definitions);
 }
 
 /**
@@ -70,10 +92,9 @@ int main(int argc, char *argv[])
   }
   
   // things are looking good...
-  map<string, Definition> grammar;
-  readGrammar(grammarFile, grammar);
-  cout << "The grammar file called \"" << argv[1] << "\" contains "
-       << grammar.size() << " definitions." << endl;
+  map<string, Definition> definitions;
+  readGrammar(grammarFile, definitions);
+  cout << produceRandomSentences(definitions);
   
   return 0;
 }

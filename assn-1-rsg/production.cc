@@ -34,9 +34,28 @@ Production::Production(ifstream& infile)  // phrases is constructed, size is 0
     infile >> token;  // ignores whitespace by default
     if (token == ";") break;
     phrases.push_back(token);
+    if (token.at(0) == '<')
+      nonterminals.push_back(token);
   }
   
   string uselessText;
   getline(infile, uselessText); // read everything else as if it's important
   // oh, no it's not.. it's useless.. but we're glad it's been pulled from the stream..
+}
+
+const string Production::expand(map<string, string>& expansions) const 
+{
+  string result;
+
+  for (const_iterator it = begin(); it != end(); ++it) {
+    if (it != begin()) 
+      result += " ";
+    
+    if (expansions.find(*it) != expansions.end())
+      result += expansions[*it];
+    else
+      result += *it;
+  }
+
+  return (const string)result;
 }
