@@ -198,9 +198,9 @@ static void queryForActors(const imdb& db)
  * that the imdb constructor is called, 
  */
 
-int main(int argc, char **argv)
+int main(int argc, const char *argv[])
 {
-  imdb db(determinePathToData());
+  imdb db(determinePathToData(argv[1]));
   if (!db.good()) { cerr << "Data directory not found!  Aborting..." << endl; return 1; }
   queryForActors(db);
   return 0;

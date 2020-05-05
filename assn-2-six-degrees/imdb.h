@@ -88,7 +88,17 @@ class imdb {
   static const char *const kMovieFileName;
   const void *actorFile;
   const void *movieFile;
-  
+
+  struct SearchKeyActor {
+    const string& name;
+    char* file;
+  };
+
+  struct SearchKeyMovie {
+    const film& movie;
+    char* file;
+  };
+
   // everything below here is complicated and needn't be touched.
   // you're free to investigate, but you're on your own.
   struct fileInfo {
@@ -99,6 +109,13 @@ class imdb {
   
   static const void *acquireFileMap(const string& fileName, struct fileInfo& info);
   static void releaseFileMap(struct fileInfo& info);
+
+  static int findActorCmp(const void* a, const void* b);
+  char* findActor(const string& query) const;
+  static int findMovieCmp(const void* a, const void* b);
+  char* findMovie(const film& movie) const;
+
+  static struct film getFilm(const void *movieFile, int offset);
 
   // marked as private so imdbs can't be copy constructed or reassigned.
   // if we were to allow this, we'd alias open files and accidentally close
