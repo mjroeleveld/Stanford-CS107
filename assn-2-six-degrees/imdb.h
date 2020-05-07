@@ -1,6 +1,7 @@
 #ifndef __imdb__
 #define __imdb__
 
+#include "path.h"
 #include "imdb-utils.h"
 #include <string>
 #include <vector>

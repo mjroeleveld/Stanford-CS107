@@ -37,6 +37,67 @@ static string promptForActor(const string& prompt, const imdb& db)
   }
 }
 
+bool generateShortestPath(imdb& db, const string& player1, const string& player2, path& path, int depth,
+                          vector<string> markedPlayers)
+{
+  if (depth > 7) return 0;
+  vector<film> films;
+  db.getCredits(player1, films);
+  vector<film>::const_iterator fit = films.begin();
+  vector<vector<string> > players;
+  vector<string>::const_iterator pit;
+  // Loop over player's films
+  for (; fit != films.end(); fit++) {
+    vector<string> fPlayers;
+    db.getCast(*fit, fPlayers);
+    // Loop over film's players
+    for (pit = fPlayers.begin(); pit != fPlayers.end(); pit++) {
+      // Skip already checked players
+      if (find(markedPlayers.begin(), markedPlayers.end(), *pit) != markedPlayers.end()) {
+        pit = fPlayers.erase(pit);
+        break;
+      }
+      markedPlayers.insert(markedPlayers.end(), *pit);
+      if (*pit == player2) {
+        path.addConnection(*fit, *pit);
+        return 1;
+      }
+    }
+    players.insert(players.end(), fPlayers);
+  }
+  vector<vector<string> >::const_iterator fpit = players.begin();
+  // Recursively search through found players' movies
+  for (fit = films.begin(); fit != films.end(); fit++) {
+    // Loop over film's player
+    for (pit = (*fpit).begin(); pit != (*fpit).end(); pit++) {
+      bool found = generateShortestPath(db, *pit, player2, path, depth + 1, markedPlayers);
+      if (found) {
+        path.addConnection(*fit, *pit);
+        return 1;
+      }
+    }
+    fpit++;
+  }
+  return 0;
+}
+
+/**
+ * DFS algorithm that finds shortest path between two players.
+ *
+ * @param db
+ * @param player1
+ * @param player2
+ * @param path
+ * @param depth
+ * @return
+ */
+bool generateShortestPath(imdb& db, const string& player1, const string& player2, path& path)
+{
+  vector<string> markedPlayers;
+  generateShortestPath(db, player1, player2, path, 1, markedPlayers);
+  path.reverse();
+}
+
 /**
  * Serves as the main entry point for the six-degrees executable.
  * There are no parameters to speak of.
@@ -60,7 +121,7 @@ int main(int argc, const char *argv[])
     cout << "Please check to make sure the source files exist and that you have permission to read them." << endl;
     exit(1);
   }
-  
+
   while (true) {
     string source = promptForActor("Actor or actress", db);
     if (source == "") break;
@@ -69,11 +130,12 @@ int main(int argc, const char *argv[])
     if (source == target) {
       cout << "Good one.  This is only interesting if you specify two different people." << endl;
     } else {
-      // replace the following line by a call to your generateShortestPath routine... 
-      cout << endl << "No path between those two people could be found." << endl << endl;
+      path shortestPath(source);
+      generateShortestPath(db, source, target, shortestPath);
+      cout << endl << shortestPath;
     }
   }
-  
+
   cout << "Thanks for playing!" << endl;
   return 0;
 }

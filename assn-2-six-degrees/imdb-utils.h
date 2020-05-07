@@ -21,7 +21,8 @@ struct film {
   
   string title;
   int year;
-  
+  short noPlayers;
+
   /** 
    * Methods: operator==
    *          operator<
