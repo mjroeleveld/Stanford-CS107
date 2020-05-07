@@ -1,5 +1,5 @@
 thesaurus-lookup
-vectortest
-hashsettest
+vector-test
+hashset-test
 .idea
 *.o

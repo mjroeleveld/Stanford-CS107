@@ -68,7 +68,11 @@ typedef void (*VectorFreeFunction)(void *elemAddr);
  */
 
 typedef struct {
-  // to be filled in by you
+  int elemSize;
+  int logLength;
+  int allocLength;
+  void* elems;
+  VectorFreeFunction freeFn;
 } vector;
 
 /** 
@@ -265,5 +269,8 @@ void VectorSort(vector *v, VectorCompareFunction comparefn);
  */
 
 void VectorMap(vector *v, VectorMapFunction mapfn, void *auxData);
+
+static void growElems(vector *v);
+static void shrinkElems(vector *v);
 
 #endif
