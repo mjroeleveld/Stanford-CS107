@@ -99,7 +99,7 @@ static const int kNotFound = -1;
 int VectorSearch(const vector *v, const void *key, VectorCompareFunction searchFn, int startIndex, bool isSorted)
 {
   assert(startIndex >= 0);
-  assert(startIndex < v->logLength);
+  assert(startIndex <= v->logLength);
   if (!isSorted) {
     for (int i = startIndex; i < v->logLength; i++) {
       if (searchFn(VectorNth(v, i), key) == 0)
