@@ -1,0 +1,4 @@
+rss-news-search
+.idea
+*.o
+cmake-build-debug/
