@@ -1,6 +1,8 @@
 # Stanford CS107 programming assignments
 
-My implementation of the CS107 course's programming assignments.
+My implementation of the CS107 course's programming assignments. The libraries and Makefiles have been updated to make them work with MacOS (Catalina).
+
+For assignment 6, install Expat using Homebrew (`brew install expat`).
 
 [Course homepage](https://see.stanford.edu/Course/CS107)
 

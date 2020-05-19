@@ -18,6 +18,9 @@ typedef struct {
   hashset stopWords;
   hashset indices;
   vector previouslySeenArticles;
+  Semaphore previouslySeenArticlesOpen;
+  Semaphore indicesOpen;
+  Semaphore stopWordsOpen;
 } rssDatabase;
 
 typedef struct {
@@ -28,6 +31,7 @@ typedef struct {
 
 typedef struct {
   rssDatabase *db;
+  Semaphore *urlconnOpen;
   rssFeedEntry entry;
 } rssFeedState;
 
@@ -57,10 +61,11 @@ static void ProcessStartTag(void *userData, const char *name, const char **atts)
 static void ProcessEndTag(void *userData, const char *name);
 static void ProcessTextData(void *userData, const char *text, int len);
 
-static void ParseArticle(rssDatabase *db, const char *articleTitle, const char *articleURL);
-static void ScanArticle(streamtokenizer *st, int articleID, hashset *indices, hashset *stopWords);
+static void ParseArticle(rssDatabase *db, const char *articleTitle, const char *articleURL, Semaphore *urlconnOpen);
+static void ScanArticle(streamtokenizer *st, int articleID, hashset *indices, hashset *stopWords,
+    Semaphore *indicesOpen);
 static bool WordIsWorthIndexing(const char *word, hashset *stopWords);
-static void AddWordToIndices(hashset *indices, const char *word, int articleIndex);
+static void AddWordToIndices(hashset *indices, const char *word, int articleIndex, Semaphore *indicesOpen);
 static void QueryIndices(rssDatabase *db);
 static void ProcessResponse(rssDatabase *db, const char *word);
 static void ListTopArticles(rssIndexEntry *index, vector *previouslySeenArticles);
@@ -98,19 +103,29 @@ static int ArticleFrequencyCompare(const void *elem1, const void *elem2);
  *         within the code base that end the program abnormally)
  */
 
-static const char *const kWelcomeTextFile = "http://cs107.stanford.edu/rss-news/welcome.txt";
-static const char *const kDefaultStopWordsFile = "http://cs107.stanford.edu/rss-news/stop-words.txt";
-static const char *const kDefaultFeedsFile = "http://cs107.stanford.edu/rss-news/rss-feeds.txt";
+static const char *const kDefaultStopWordsFile = "data/stop-words.txt";
+static const char *const kWelcomeTextFile = "data/welcome.txt";
+static const char *const kDefaultFeedsFile = "data/rss-feeds.txt";
 int main(int argc, char **argv)
 {
   const char *feedsFileName = (argc == 1) ? kDefaultFeedsFile : argv[1];
   rssDatabase db;
-  
+
   InitThreadPackage(false);
+  // Initialize semaphores
+  db.previouslySeenArticlesOpen = SemaphoreNew("previouslySeenArticlesOpen", 1);
+  db.indicesOpen = SemaphoreNew("indicesOpen", 1);
+  db.stopWordsOpen = SemaphoreNew("stopWordsOpen", 1);
+
   Welcome(kWelcomeTextFile);
   LoadStopWords(&db.stopWords, kDefaultStopWordsFile);
   BuildIndices(&db, feedsFileName);
   QueryIndices(&db);
+
+  SemaphoreFree(db.previouslySeenArticlesOpen);
+  SemaphoreFree(db.indicesOpen);
+  SemaphoreFree(db.stopWordsOpen);
+
   return 0;
 }
 
@@ -132,29 +147,23 @@ int main(int argc, char **argv)
  */
  
 static const char *const kNewLineDelimiters = "\r\n";
-static void Welcome(const char *welcomeTextURL)
+static void Welcome(const char *welcomeTextFileName)
 {
-  url u;
-  urlconnection urlconn;
-  
-  URLNewAbsolute(&u, welcomeTextURL);
-  URLConnectionNew(&urlconn, &u);
-  
-  if (urlconn.responseCode / 100 == 3) {
-    Welcome(urlconn.newUrl);
-  } else {
-    streamtokenizer st;
-    char buffer[4096];
-    STNew(&st, urlconn.dataStream, kNewLineDelimiters, true);
-    while (STNextToken(&st, buffer, sizeof(buffer))) {
-      printf("%s\n", buffer);
-    }  
-    printf("\n");
-    STDispose(&st); // remember that STDispose doesn't close the file, since STNew doesn't open one.. 
+  FILE *infile;
+  streamtokenizer st;
+  char buffer[1024];
+
+  infile = fopen(welcomeTextFileName, "r");
+  assert(infile != NULL);
+
+  STNew(&st, infile, kNewLineDelimiters, true);
+  while (STNextToken(&st, buffer, sizeof(buffer))) {
+    printf("%s\n", buffer);
   }
 
-  URLConnectionDispose(&urlconn);
-  URLDispose(&u);
+  printf("\n");
+  STDispose(&st); // remember that STDispose doesn't close the file, since STNew doesn't open one..
+  fclose(infile);
 }
 
 /**
@@ -178,31 +187,19 @@ static void Welcome(const char *welcomeTextURL)
  * No return value.
  */
 
-static const int kNumStopWordsBuckets = 1009;
-static void LoadStopWords(hashset *stopWords, const char *stopWordsURL)
+static void LoadStopWords(hashset *stopWords, const char *stopWordsFile)
 {
-  url u;
-  urlconnection urlconn;
-  
-  URLNewAbsolute(&u, stopWordsURL);
-  URLConnectionNew(&urlconn, &u);
-  
-  if (urlconn.responseCode / 100 == 3) {
-    LoadStopWords(stopWords, urlconn.newUrl);
-  } else {
-    streamtokenizer st;
-    char buffer[4096];
-    HashSetNew(stopWords, sizeof(char *), kNumStopWordsBuckets, StringHash, StringCompare, StringFree);
-    STNew(&st, urlconn.dataStream, kNewLineDelimiters, true);
-    while (STNextToken(&st, buffer, sizeof(buffer))) {
-      char *stopWord = strdup(buffer);
-      HashSetEnter(stopWords, &stopWord);
-    }
-    STDispose(&st);
-  }
+  FILE *infile;
+  streamtokenizer st;
+  char buffer[128];
 
-  URLConnectionDispose(&urlconn);
-  URLDispose(&u);
+  HashSetNew(stopWords, sizeof(char *), 1009, StringHash, StringCompare, StringFree);
+  infile = fopen(stopWordsFile, "r");
+  STNew(&st, infile, kNewLineDelimiters, true);
+  while (STNextToken(&st, buffer, sizeof(buffer))) {
+    char *addr = strdup(buffer);
+    HashSetEnter(stopWords, &addr);
+  }
 }
 
 /**
@@ -228,34 +225,29 @@ static void LoadStopWords(hashset *stopWords, const char *stopWordsURL)
  */
 
 static const int kNumIndexEntryBuckets = 10007;
-static void BuildIndices(rssDatabase *db, const char *feedsFileURL)
+static void BuildIndices(rssDatabase *db, const char *feedsFileName)
 {
-  url u;
-  urlconnection urlconn;
-  
-  URLNewAbsolute(&u, feedsFileURL);
-  URLConnectionNew(&urlconn, &u);
-  
-  if (urlconn.responseCode / 100 == 3) {
-    BuildIndices(db, urlconn.newUrl);
-  } else {
-    streamtokenizer st;
-    char remoteFileName[2048];
-    HashSetNew(&db->indices, sizeof(rssIndexEntry), kNumIndexEntryBuckets, IndexEntryHash, IndexEntryCompare, IndexEntryFree);
-    VectorNew(&db->previouslySeenArticles, sizeof(rssNewsArticle), NewsArticleFree, 0);
-    STNew(&st, urlconn.dataStream, kNewLineDelimiters, true);
-    while (STSkipUntil(&st, ":") != EOF) { // ignore everything up to the first selicolon of the line
-      STSkipOver(&st, ": ");		   // now ignore the semicolon and any whitespace directly after it
-      STNextToken(&st, remoteFileName, sizeof(remoteFileName));   
-      ProcessFeed(db, remoteFileName);
-    }
-    printf("\n");
-    STDispose(&st);
+  FILE *infile;
+  streamtokenizer st;
+  char remoteFileName[2048];
+
+  infile = fopen(feedsFileName, "r");
+  assert(infile != NULL);
+  HashSetNew(&db->indices, sizeof(rssIndexEntry), kNumIndexEntryBuckets, IndexEntryHash, IndexEntryCompare, IndexEntryFree);
+  VectorNew(&db->previouslySeenArticles, sizeof(rssNewsArticle), NewsArticleFree, 0);
+  STNew(&st, infile, kNewLineDelimiters, true);
+  while (STSkipUntil(&st, ":") != EOF) { // ignore everything up to the first selicolon of the line
+    STSkipOver(&st, ": ");		 // now ignore the semicolon and any whitespace directly after it
+    STNextToken(&st, remoteFileName, sizeof(remoteFileName));
+    ProcessFeed(db, remoteFileName);
   }
-  
-  URLConnectionDispose(&urlconn);
-  URLDispose(&u);
+
+  STDispose(&st);
+  fclose(infile);
+  printf("\n");
+
 }
+
 
 /**
  * Function: ProcessFeed
@@ -330,7 +322,8 @@ static void ProcessFeed(rssDatabase *db, const char *remoteDocumentName)
 
 static void PullAllNewsItems(rssDatabase *db, urlconnection *urlconn)
 {
-  rssFeedState state = {db}; // passed through the parser by address as auxiliary data.
+  Semaphore urlconnOpen = SemaphoreNew("urlconnOpen", 24);
+  rssFeedState state = {db, &urlconnOpen}; // passed through the parser by address as auxiliary data.
   streamtokenizer st;
   char buffer[2048];
 
@@ -346,7 +339,9 @@ static void PullAllNewsItems(rssDatabase *db, urlconnection *urlconn)
   STDispose(&st);
   
   XML_Parse(rssFeedParser, "", 0, true); // instructs the xml parser that we're done parsing..
-  XML_ParserFree(rssFeedParser);  
+  XML_ParserFree(rssFeedParser);
+  RunAllThreads();
+  SemaphoreFree(urlconnOpen);
 }
 
 /**
@@ -409,8 +404,10 @@ static void ProcessEndTag(void *userData, const char *name)
   rssFeedState *state = userData;
   rssFeedEntry *entry = &state->entry;
   entry->activeField = NULL;
-  if (strcasecmp(name, "item") == 0) 
-    ParseArticle(state->db, entry->title, entry->url);
+  char *title = strdup(entry->title);
+  char *url = strdup(entry->url);
+  if (strcasecmp(name, "item") == 0)
+    ThreadNew(entry->url, ParseArticle, 4, state->db, title, url, state->urlconnOpen);
 }
 
 /**
@@ -475,42 +472,55 @@ static void ProcessTextData(void *userData, const char *text, int len)
  */
 
 static const char *const kTextDelimiters = " \t\n\r\b!@$%^*()_+={[}]|\\'\":;/?.>,<~`";
-static void ParseArticle(rssDatabase *db, const char *articleTitle, const char *articleURL)
+static void ParseArticle(rssDatabase *db, const char *articleTitle, const char *articleURL, Semaphore *urlconnOpen)
 {
   url u;
   urlconnection urlconn;
   streamtokenizer st;
+  char *newUrl;
   int articleID;
   
   URLNewAbsolute(&u, articleURL);
   rssNewsArticle newsArticle = { articleTitle, u.serverName, u.fullName };
-  if (VectorSearch(&db->previouslySeenArticles, &newsArticle, NewsArticleCompare, 0, false) >= 0) {
+  SemaphoreWait(db->previouslySeenArticlesOpen);
+  bool previouslySeen = VectorSearch(&db->previouslySeenArticles, &newsArticle, NewsArticleCompare, 0, false) >= 0;
+  SemaphoreSignal(db->previouslySeenArticlesOpen);
+  if (previouslySeen) {
     printf("[Ignoring \"%s\": we've seen it before.]\n", articleTitle);
     URLDispose(&u); 
     return; 
   }
-  
+
+  SemaphoreWait(*urlconnOpen);
   URLConnectionNew(&urlconn, &u);
   switch (urlconn.responseCode) {
-      case 0: printf("Unable to connect to \"%s\".  Domain name or IP address is nonexistent.\n", articleURL);
-              break;
-      case 200: printf("[%s] Indexing \"%s\"\n", u.serverName, articleTitle);
-		NewsArticleClone(&newsArticle, articleTitle, u.serverName, u.fullName);
-		VectorAppend(&db->previouslySeenArticles, &newsArticle);
-		articleID = VectorLength(&db->previouslySeenArticles) - 1;
-	        STNew(&st, urlconn.dataStream, kTextDelimiters, false);
-		ScanArticle(&st, articleID, &db->indices, &db->stopWords);
-		STDispose(&st);
-		break;
-      case 301: 
-      case 302: // just pretend we have the redirected URL all along, though index using the new URL and not the old one...
-	        ParseArticle(db, articleTitle, urlconn.newUrl);
-		break;
-      default: printf("Unable to pull \"%s\" from \"%s\". [Response code: %d] Punting...\n", articleTitle, u.serverName, urlconn.responseCode);
-	       break;
+    case 0: printf("Unable to connect to \"%s\".  Domain name or IP address is nonexistent.\n", articleURL);
+      break;
+    case 200: printf("[%s] Indexing \"%s\"\n", u.serverName, articleTitle);
+      NewsArticleClone(&newsArticle, articleTitle, u.serverName, u.fullName);
+      SemaphoreWait(db->previouslySeenArticlesOpen);
+      VectorAppend(&db->previouslySeenArticles, &newsArticle);
+      articleID = VectorLength(&db->previouslySeenArticles) - 1;
+      SemaphoreSignal(db->previouslySeenArticlesOpen);
+      STNew(&st, urlconn.dataStream, kTextDelimiters, false);
+      ScanArticle(&st, articleID, &db->indices, &db->stopWords, &db->indicesOpen);
+      STDispose(&st);
+      break;
+    case 301:
+    case 302: // just pretend we have the redirected URL all along, though index using the new URL and not the old one...
+      newUrl = strdup(urlconn.newUrl);
+      URLConnectionDispose(&urlconn);
+      SemaphoreSignal(*urlconnOpen);
+      ParseArticle(db, articleTitle, newUrl, urlconnOpen);
+      break;
+    default: printf("Unable to pull \"%s\" from \"%s\". [Response code: %d] Punting...\n", articleTitle, u.serverName, urlconn.responseCode);
+       break;
   }
-  
-  URLConnectionDispose(&urlconn);
+
+  if (urlconn.responseCode != 302) {
+    URLConnectionDispose(&urlconn);
+    SemaphoreSignal(*urlconnOpen);
+  }
   URLDispose(&u);
 }
 
@@ -529,7 +539,8 @@ static void ParseArticle(rssDatabase *db, const char *articleTitle, const char *
  * No return value.
  */
 
-static void ScanArticle(streamtokenizer *st, int articleID, hashset *indices, hashset *stopWords)
+static void ScanArticle(streamtokenizer *st, int articleID, hashset *indices, hashset *stopWords,
+    Semaphore *indicesOpen)
 {
   char word[1024];
 
@@ -539,7 +550,7 @@ static void ScanArticle(streamtokenizer *st, int articleID, hashset *indices, ha
     } else {
       RemoveEscapeCharacters(word);
       if (WordIsWorthIndexing(word, stopWords))
-	AddWordToIndices(indices, word, articleID);
+        AddWordToIndices(indices, word, articleID, indicesOpen);
     }
   }
 }
@@ -580,9 +591,10 @@ static bool WordIsWorthIndexing(const char *word, hashset *stopWords)
  * No return value.
  */
 
-static void AddWordToIndices(hashset *indices, const char *word, int articleIndex)
+static void AddWordToIndices(hashset *indices, const char *word, int articleIndex, Semaphore *indicesOpen)
 {
   rssIndexEntry indexEntry = { word }; // partial intialization
+  SemaphoreWait(*indicesOpen);
   rssIndexEntry *existingIndexEntry = HashSetLookup(indices, &indexEntry);
   if (existingIndexEntry == NULL) {
     indexEntry.meaningfulWord = strdup(word);
@@ -603,9 +615,10 @@ static void AddWordToIndices(hashset *indices, const char *word, int articleInde
   rssRelevantArticleEntry *existingArticleEntry = 
     VectorNth(&existingIndexEntry->relevantArticles, existingArticleIndex);
   existingArticleEntry->freq++;
+  SemaphoreSignal(*indicesOpen);
 }
 
-/** 
+/**
  * Function: QueryIndices
  * ----------------------
  * Standard query loop that allows the user to specify a single search term, and
