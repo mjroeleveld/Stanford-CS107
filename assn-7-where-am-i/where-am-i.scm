@@ -137,10 +137,10 @@
 ;; cons'ed to the front of it.  
 ;; 
 
-(define (partition pivot num-list)
+(define (partition pivot num-list fn)
   (if (null? num-list) '(() ())
-      (let ((split-of-rest (partition pivot (cdr num-list))))
-	(if (< (car num-list) pivot)
+      (let ((split-of-rest (partition pivot (cdr num-list) fn)))
+	(if (fn (car num-list) pivot)
 	    (list (cons (car num-list) (car split-of-rest)) (cadr split-of-rest))
 	    (list (car split-of-rest) (cons (car num-list) (car (cdr split-of-rest))))))))
 
@@ -156,12 +156,12 @@
 ;; together in the proper order.
 ;;
 
-(define (quicksort num-list)
-  (if (<= (length num-list) 1) num-list
-      (let ((split (partition (car num-list) (cdr num-list))))
-	(append (quicksort (car split)) 
-		(list (car num-list)) 
-		(quicksort (cadr split))))))
+(define (quicksort ls fn)
+  (if (<= (length ls) 1) ls
+      (let ((split (partition (car ls) (cdr ls) fn)))
+	(append (quicksort (car split) fn)
+		(list (car ls))
+		(quicksort (cadr split) fn)))))
 
 ;;
 ;; Function: remove
@@ -209,3 +209,58 @@
 ;; it to override exisiting definitions and including
 ;; the most recently implemented into the lot.
 ;;
+
+(define (intersection-points circles)
+  (if (= (length circles) 1) '()
+  	(append
+      (apply append 
+        (map (lambda (other-circle)
+          (intersect (car circles) other-circle))
+        (cdr circles)))
+    (intersection-points (cdr circles)))))
+
+(define (distance-product point points) 
+  (apply * 
+    (map (lambda (other-point) 
+      (dist point other-point))
+    (remove point points))))
+
+(define (rate-points points) 
+  (map (lambda (point) 
+    (list (distance-product point
+      (remove point points))
+    point))
+  points))
+
+(define (sort-points rated-points)
+  (quicksort rated-points 
+    (lambda (elem1 elem) 
+      (< (car elem1) (car elem)))))
+
+(define (clumped-points points)
+  (prefix-of-list 
+    (map (lambda (point) 
+      (cadr point))
+    (sort-points 
+      (rate-points points)))
+  (/ (length points) 2)))
+
+(define (average ls) 
+  (/ (apply + ls) (length ls)))
+
+(define (average-point points)
+  (let (
+    (avg-pt  
+      (list (average (map car points)) (average (map cadr points)))))
+  (list (distance-product avg-pt points) avg-pt)))
+
+(define (best-estimate guess)
+  (average-point 
+    (clumped-points
+      (intersection-points guess))))
+
+(define (where-am-i distances stars)
+  (quicksort
+    (map best-estimate (all-guesses distances stars))
+  (lambda (elem1 elem)
+    (< (car elem1) (car elem)))))
