@@ -8,29 +8,45 @@ def findOptimalAlignment(strand1, strand2):
 	
 	# if one of the two strands is empty, then there is only
 	# one possible alignment, and of course it's optimal
-	if len(strand1) == 0: return len(strand2) * -2
-	if len(strand2) == 0: return len(strand1) * -2
+	if len(strand1) == 0: 
+		return [
+			len(strand2) * -2, 
+			[' ' for l in strand2],
+			[l for l in reversed(strand2)]]
+	if len(strand2) == 0: 
+		return [
+			len(strand1) * -2, 
+			[l for l in reversed(strand1)],
+			[' ' for l in strand1]]
 
 	# There's the scenario where the two leading bases of
 	# each strand are forced to align, regardless of whether or not
 	# they actually match.
-	bestWith = findOptimalAlignment(strand1[1:], strand2[1:])
-	if strand1[0] == strand2[0]: 
-		return bestWith + 1 # no benefit from making other recursive calls
+	best = findOptimalAlignment(strand1[1:], strand2[1:])
+	best[1].append(strand1[0])
+	best[2].append(strand2[0])
 
-	best = bestWith - 1
+	if strand1[0] == strand2[0]: 
+		best[0] += 1
+		return best # no benefit from making other recursive calls
+
+	best[0] -= 1
 	
 	# It's possible that the leading base of strand1 best
 	# matches not the leading base of strand2, but the one after it.
 	bestWithout = findOptimalAlignment(strand1, strand2[1:])
-	bestWithout -= 2 # penalize for insertion of space
-	if bestWithout > best:
+	bestWithout[0] -= 2 # penalize for insertion of space
+	if bestWithout[0] > best[0]:
+		bestWithout[1].append(' ')
+		bestWithout[2].append(strand2[0])
 		best = bestWithout
 
 	# opposite scenario
 	bestWithout = findOptimalAlignment(strand1[1:], strand2)
-	bestWithout -= 2 # penalize for insertion of space	
-	if bestWithout > best:
+	bestWithout[0] -= 2 # penalize for insertion of space	
+	if bestWithout[0] > best[0]:
+		bestWithout[1].append(strand1[0])
+		bestWithout[2].append(' ')
 		best = bestWithout
 
 	return best
@@ -55,8 +71,27 @@ def generateRandomDNAStrand(minlength, maxlength):
 # This is more of a placeholder for what will ultimately
 # print out not only the score but the alignment as well.
 
-def printAlignment(score, out = sys.stdout):	
-	out.write("Optimal alignment score is " + str(score) + "\n")
+def printAlignment(alignment, out = sys.stdout):	
+	[score, str1, str2] = alignment
+	str1.reverse()
+	str2.reverse()
+	def plusValue(i):
+		if str1[i] == str2[i] and str1 != ' ':
+			return "1"
+		return " "		
+	def minusValue(i):
+		if str1[i] == ' ' or str2[i] == ' ':
+			return "2"
+		if str1[i] != str2[i]:
+			return "1"
+		return " "
+	plus = map(plusValue, range(len(str1)))
+	minus = map(minusValue, range(len(str1)))
+	out.write("\nOptimal alignment score is " + str(score) + "\n\n")
+	out.write("+ " + "".join(plus) + "\n")
+	out.write("  " + ''.join(str1) + "\n")
+	out.write("  " + ''.join(str2) + "\n")
+	out.write("- " + "".join(minus) + "\n\n")
 
 # Unit test main in place to do little more than
 # exercise the above algorithm.  As written, it
