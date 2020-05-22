@@ -2,54 +2,62 @@
 
 import random # for seed, random
 import sys    # for stdout
+import copy
 
 # Computes the score of the optimal alignment of two DNA strands.
-def findOptimalAlignment(strand1, strand2):
+def findOptimalAlignment(strand1, strand2, cache = {}):
+	key = (strand1, strand2)
+	if key in cache:
+		return cache[key]
+
+	def ret(ans):
+		cache[key] = copy.deepcopy(ans)
+		return ans
 	
 	# if one of the two strands is empty, then there is only
 	# one possible alignment, and of course it's optimal
 	if len(strand1) == 0: 
-		return [
-			len(strand2) * -2, 
-			[' ' for l in strand2],
-			[l for l in reversed(strand2)]]
+		return ret({
+			'score': len(strand2) * -2, 
+			'strand1': [' ' for l in strand2],
+			'strand2': [l for l in reversed(strand2)]})
 	if len(strand2) == 0: 
-		return [
-			len(strand1) * -2, 
-			[l for l in reversed(strand1)],
-			[' ' for l in strand1]]
+		return ret({
+			'score': len(strand1) * -2, 
+			'strand1': [l for l in reversed(strand1)],
+			'strand2': [' ' for l in strand1]})
 
 	# There's the scenario where the two leading bases of
 	# each strand are forced to align, regardless of whether or not
 	# they actually match.
 	best = findOptimalAlignment(strand1[1:], strand2[1:])
-	best[1].append(strand1[0])
-	best[2].append(strand2[0])
+	best['strand1'].append(strand1[0])
+	best['strand2'].append(strand2[0])
 
 	if strand1[0] == strand2[0]: 
-		best[0] += 1
-		return best # no benefit from making other recursive calls
+		best['score'] += 1
+		return ret(best)  # no benefit from making other recursive calls
 
-	best[0] -= 1
+	best['score'] -= 1
 	
 	# It's possible that the leading base of strand1 best
 	# matches not the leading base of strand2, but the one after it.
 	bestWithout = findOptimalAlignment(strand1, strand2[1:])
-	bestWithout[0] -= 2 # penalize for insertion of space
-	if bestWithout[0] > best[0]:
-		bestWithout[1].append(' ')
-		bestWithout[2].append(strand2[0])
+	bestWithout['score'] -= 2 # penalize for insertion of space
+	if bestWithout['score'] > best[0]:
+		bestWithout['strand1'].append(' ')
+		bestWithout['strand2'].append(strand2[0])
 		best = bestWithout
 
 	# opposite scenario
 	bestWithout = findOptimalAlignment(strand1[1:], strand2)
-	bestWithout[0] -= 2 # penalize for insertion of space	
-	if bestWithout[0] > best[0]:
-		bestWithout[1].append(strand1[0])
-		bestWithout[2].append(' ')
+	bestWithout['score'] -= 2 # penalize for insertion of space	
+	if bestWithout['score'] > best[0]:
+		bestWithout['strand1'].append(strand1[0])
+		bestWithout['strand2'].append(' ')
 		best = bestWithout
 
-	return best
+	return ret(best)
 
 # Utility function that generates a random DNA string of
 # a random length drawn from the range [minlength, maxlength]
